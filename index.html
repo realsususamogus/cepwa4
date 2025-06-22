@@ -7,6 +7,20 @@
   </head>
   <body>
     <main></main>
+    <div class="ui-overlay">
+      <div>Wave: <span id="wave">1</span> | Energy: <span id="energy">100</span></div>
+      <div>Aliens: <span id="aliens">0</span> | Towers: <span id="towers">0</span></div>
+      <div>Evolution Gen: <span id="generation">1</span></div>
+  </div>
+  
+  <div class="controls">
+      <button onclick="placeTower('laser')">Laser Tower (20)</button>
+      <button onclick="placeTower('plasma')">Plasma Tower (35)</button>
+      <button onclick="placeTower('quantum')">Quantum Tower (50)</button>
+      <button onclick="startWave()">Start Wave</button>
+      <button onclick="evolveEnemies()">Force Evolution</button>
+  </div>
+
     <script src="p5.min.js"></script>
     <script src="sketch.js"></script>
   </body>
