@@ -464,6 +464,7 @@ function drawGame() {
     
     // Draw UI
     fill(255);
+    textSize(16);
     text(`Territory Captured: ${capturedPercent.toFixed(1)}%`, 10, 20);
     text(`Aliens: ${aliens.length}`, 10, 40);
     text(`Turrets: ${turrets.length}`, 10, 60);
