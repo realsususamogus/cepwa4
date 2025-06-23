@@ -14,19 +14,67 @@ let mapHeight = 600;
 let cellSize = 20;
 let mapCols, mapRows;
 let obstacles = [];
+const GRID_SIZE = 25;
 
 // Genetic algorithm settings
 let populationSize = 50;
 let mutationRate = 0.1;
 
-function setup() {
-    createCanvas(mapWidth, mapHeight);
+// Add this function to handle window resizing:
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+    
+    // Update map dimensions
+    mapWidth = width;
+    mapHeight = height;
     mapCols = mapWidth / cellSize;
     mapRows = mapHeight / cellSize;
     
+    COLS = Math.floor(width / GRID_SIZE);
+    ROWS = Math.floor(height / GRID_SIZE);
+    
+    // Update base and spawn positions
+    gameState.basePosition = { x: width - 100, y: height / 2 };
+    gameState.spawnPosition = { x: 100, y: height / 2 };
+    
+    // Regenerate grids and territory for new size
+    initializeTerritory();
+    generateMapWFC();
+    
+    console.log(`Resized to ${width}x${height}`);
+}
+
+function setup() {
+    // Create canvas that fills the browser window
+    createCanvas(windowWidth, windowHeight);
+    
+    // Update map dimensions based on new canvas size
+    mapWidth = width;
+    mapHeight = height;
+    mapCols = mapWidth / cellSize;
+    mapRows = mapHeight / cellSize;
+    
+    COLS = Math.floor(width / GRID_SIZE);
+    ROWS = Math.floor(height / GRID_SIZE);
+    
+    // Set base and spawn positions relative to new canvas size
+    gameState.basePosition = { x: width - 100, y: height / 2 };
+    gameState.spawnPosition = { x: 100, y: height / 2 };
+    
+    // Initialize grids with new dimensions
+    infestationGrid = [];
+    for (let y = 0; y < ROWS; y++) {
+        infestationGrid[y] = [];
+        for (let x = 0; x < COLS; x++) {
+            infestationGrid[y][x] = 0;
+        }
+    }
+    
+    // Reinitialize territory with new dimensions
+    territory = [];
     initializeTerritory();
     generateMap();
-    initializeAlienGenes();
+    initializeAlienGenes(20);
 }
 
 function draw() {
@@ -104,7 +152,53 @@ function updateGame() {
     updateTerritory();
     calculateCapturedPercent();
 }
+// Wave system variables
+let waveActive = false;
+let waveStartTime = 0;
+let waveDuration = 30000; // 30 seconds per wave
+let waveBreakDuration = 10000; // 10 seconds between waves
+let aliensToSpawn = 0;
+let aliensSpawned = 0;
 
+function updateWaveSystem() {
+    let currentTime = millis();
+    
+    if (!waveActive) {
+        // Between waves
+        if (currentTime - waveStartTime >= waveBreakDuration) {
+            startNewWave();
+        }
+    } else {
+        // During wave
+        if (aliensSpawned < aliensToSpawn && frameCount % 60 === 0) {
+            spawnAlien();
+            aliensSpawned++;
+        }
+        
+        // Check if wave is complete
+        if (aliensSpawned >= aliensToSpawn && aliens.length === 0) {
+            endWave();
+        }
+        
+        // Force end wave after duration
+        if (currentTime - waveStartTime >= waveDuration) {
+            endWave();
+        }
+    }
+}
+
+function startNewWave() {
+    currentWave++;
+    waveActive = true;
+    waveStartTime = millis();
+    aliensToSpawn = 5 + (currentWave * 3); // Increase aliens per wave
+    aliensSpawned = 0;
+}
+
+function endWave() {
+    waveActive = false;
+    waveStartTime = millis();
+}
 function spawnAlien() {
     let gene = random(alienGenes);
     let alien = {
@@ -139,7 +233,15 @@ function spawnAlien() {
     
     aliens.push(alien);
 }
-
+function checkObstacleCollision(x, y) {
+    for (let obstacle of obstacles) {
+        if (x >= obstacle.x && x <= obstacle.x + cellSize &&
+            y >= obstacle.y && y <= obstacle.y + cellSize) {
+            return true;
+        }
+    }
+    return false;
+}
 function updateAlien(alien) {
     // Move toward target
     let dx = alien.target.x - alien.x;
@@ -161,8 +263,21 @@ function updateAlien(alien) {
         territory[gridX][gridY] = 'alien';
     }
 }
-
 function updateTurret(turret) {
+    // Check if turret is on alien territory
+    let gridX = floor(turret.x / cellSize);
+    let gridY = floor(turret.y / cellSize);
+    if (gridX >= 0 && gridX < mapCols && gridY >= 0 && gridY < mapRows) {
+        if (territory[gridX][gridY] === 'alien') {
+            // Turret explodes - remove it from the array
+            let index = turrets.indexOf(turret);
+            if (index > -1) {
+                turrets.splice(index, 1);
+            }
+            return; // Exit early since turret is destroyed
+        }
+    }
+    
     // Find nearest alien
     let nearest = null;
     let minDist = turret.range;
@@ -187,6 +302,7 @@ function updateTurret(turret) {
         });
     }
 }
+
 
 function updateProjectile(projectile) {
     if (projectile.target && projectile.target.health > 0) {
@@ -242,7 +358,36 @@ function checkGameOver() {
         evolveAliens();
     }
 }
-
+function trackAlienPerformance(alien) {
+    // Track when alien dies and calculate survival time
+    if (!alien.spawnTime) {
+        alien.spawnTime = frameCount;
+    }
+    
+    if (alien.health <= 0) {
+        alien.survivalTime = frameCount - alien.spawnTime;
+        // Store performance data for genetic algorithm
+        if (!alien.geneIndex && alien.geneIndex !== 0) {
+            // Find which gene this alien came from
+            for (let i = 0; i < alienGenes.length; i++) {
+                if (alienGenes[i].health === alien.maxHealth && 
+                    alienGenes[i].speed === alien.speed) {
+                    alien.geneIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        if (alien.geneIndex !== undefined) {
+            if (!alienGenes[alien.geneIndex].totalSurvivalTime) {
+                alienGenes[alien.geneIndex].totalSurvivalTime = 0;
+                alienGenes[alien.geneIndex].spawnCount = 0;
+            }
+            alienGenes[alien.geneIndex].totalSurvivalTime += alien.survivalTime;
+            alienGenes[alien.geneIndex].spawnCount++;
+        }
+    }
+}
 function evolveAliens() {
     // Simple genetic algorithm
     let newGenes = [];
@@ -322,6 +467,14 @@ function drawGame() {
     text(`Territory Captured: ${capturedPercent.toFixed(1)}%`, 10, 20);
     text(`Aliens: ${aliens.length}`, 10, 40);
     text(`Turrets: ${turrets.length}`, 10, 60);
+    text(`Wave: ${currentWave}`, 150, 60);
+    
+    if (!waveActive) {
+        let timeLeft = Math.max(0, waveBreakDuration - (millis() - waveStartTime));
+        text(`Next wave in: ${Math.ceil(timeLeft / 1000)}s`, 10, 80);
+    } else {
+        text(`Aliens remaining: ${aliensToSpawn - aliensSpawned}`, 10, 80);
+    }
 }
 
 function drawGameOver() {
@@ -375,3 +528,4 @@ function keyPressed() {
         generateMap();
     }
 }
+
