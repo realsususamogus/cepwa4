@@ -1,499 +1,1127 @@
-let path = []; // Path for aliens to follow
-let aliens = []; // Array to store alien entities
-let towers = []; // Array to store towers
-let baseHealth = 100; // Player's base health
-let wave = 1; // Current wave of aliens
-let towerCost = 50; // Cost to place a tower
-let playerMoney = 200; // Player's starting money
-let level = 1; // Current level
-let selectedTower = null; // Currently selected tower for upgrades
-let spawningWave = false; // Flag to prevent multiple wave spawning
+// Game variables
+let gameState = {
+    state: 'playing',
+    wave: 1,
+    waveActive: false,
+    energy: 100,
+    money: 200,
+    basePosition: { x: 0, y: 0 },
+    spawnPosition: { x: 0, y: 0 }
+};
+
+let territory = [];
+let aliens = [];
+let turrets = [];
+let projectiles = [];
+let alienGenes = [];
+let capturedPercent = 0;
+
+// Map settings
+let mapWidth = 800;
+let mapHeight = 600;
+let cellSize = 20;
+let mapCols, mapRows;
+let obstacles = [];
+const GRID_SIZE = 25;
+
+// Genetic algorithm settings
+let populationSize = 50;
+let mutationRate = 0.1;
+
+// Wave spawning variables
+let spawnTimer = 0;
+let aliensToSpawn = 0;
+let spawnDelay = 90; // frames between spawns
+
+// Turret selection variables
+let selectedTurretType = 'combat'; // 'combat' or 'money'
+
+// Turret costs
+let combatTurretCost = 70;
+let moneyTurretCost = 100;
+
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+    
+    // Update map dimensions
+    mapWidth = width;
+    mapHeight = height;
+    mapCols = mapWidth / cellSize;
+    mapRows = mapHeight / cellSize;
+    
+    COLS = Math.floor(width / GRID_SIZE);
+    ROWS = Math.floor(height / GRID_SIZE);
+    
+    // Update base and spawn positions
+    gameState.basePosition = { x: width - 100, y: height / 2 };
+    gameState.spawnPosition = { x: 100, y: height / 2 };
+    
+    // Regenerate grids and territory for new size
+    initializeTerritory();
+    generateMap();
+    
+    console.log(`Resized to ${width}x${height}`);
+}
 
 function setup() {
-  createCanvas(1000, 700);
-  generatePath(level); // Create the path for aliens based on level
-  spawnAliens(); // Spawn initial wave of aliens
+    // Create canvas that fills the browser window
+    createCanvas(windowWidth, windowHeight);
+    
+    // Update map dimensions based on new canvas size
+    mapWidth = width;
+    mapHeight = height;
+    mapCols = mapWidth / cellSize;
+    mapRows = mapHeight / cellSize;
+    
+    COLS = Math.floor(width / GRID_SIZE);
+    ROWS = Math.floor(height / GRID_SIZE);
+    
+    // Set base and spawn positions relative to new canvas size
+    gameState.basePosition = { x: width - 100, y: height / 2 };
+    gameState.spawnPosition = { x: 100, y: height / 2 };
+    
+    // Initialize grids with new dimensions
+    infestationGrid = [];
+    for (let y = 0; y < ROWS; y++) {
+        infestationGrid[y] = [];
+        for (let x = 0; x < COLS; x++) {
+            infestationGrid[y][x] = 0;
+        }
+    }
+    
+    // Reinitialize territory with new dimensions
+    territory = [];
+    initializeTerritory();
+    generateMap();
+    initializeAlienGenes(20);
 }
 
 function draw() {
-  // Nice gradient background
-  for (let i = 0; i <= height; i++) {
-    let inter = map(i, 0, height, 0, 1);
-    let c = lerpColor(color(10, 10, 30), color(5, 5, 15), inter);
-    stroke(c);
-    line(0, i, width, i);
-  }
-  
-  drawPath(); // Render the path
-  updateAliens(); // Update alien positions
-  updateTowers(); // Update tower attacks
-  checkBaseHealth(); // Check if base health is depleted
-  displayUI(); // Display player stats (money, health, wave, level)
-  drawUpgradePanel(); // Draw upgrade buttons
-}
-
-function generatePath(level) {
-  path = []; // Clear the path for the new level
-
-  let currentX = 0; // Start point
-  let currentY = height / 2; // Start in the middle
-
-  path.push({ x: currentX, y: currentY }); // Add the starting point
-
-  let steps = 15; // More segments for longer path
-  let zigzagDirection = 1; // For creating zigzag pattern
-  
-  for (let i = 0; i < steps; i++) {
-    let nextX = currentX + random(40, 80); // Move forward in X direction
-    let nextY = currentY + (zigzagDirection * random(50, 120)); // Zigzag pattern
+    background(50);
     
-    // Alternate zigzag direction
-    if (i % 2 === 0) {
-      zigzagDirection *= -1;
-    }
-
-    // Ensure the path stays within canvas bounds
-    nextX = constrain(nextX, 0, width - 100);
-    nextY = constrain(nextY, 100, height - 100);
-
-    path.push({ x: nextX, y: nextY }); // Add the next point to the path
-
-    currentX = nextX;
-    currentY = nextY;
-  }
-
-  // Ensure the path ends at the right edge of the canvas
-  path.push({ x: width, y: currentY });
-}
-
-function drawPath() {
-  // Draw path background
-  stroke(100, 50, 150);
-  strokeWeight(20);
-  noFill();
-  beginShape();
-  for (let point of path) {
-    vertex(point.x, point.y);
-  }
-  endShape();
-  
-  // Draw path center line
-  stroke(150, 100, 200);
-  strokeWeight(4);
-  beginShape();
-  for (let point of path) {
-    vertex(point.x, point.y);
-  }
-  endShape();
-  
-  // Draw base at the end
-  fill(255, 100, 100);
-  stroke(255);
-  strokeWeight(2);
-  rect(width - 50, path[path.length - 1].y - 25, 50, 50);
-  fill(255);
-  textAlign(CENTER);
-  text("BASE", width - 25, path[path.length - 1].y + 5);
-}
-
-function spawnAliens() {
-  for (let i = 0; i < wave * 3; i++) {
-    setTimeout(() => {
-      let alienType = random() > 0.5 ? new FastAlien(path[0].x, path[0].y) : new StrongAlien(path[0].x, path[0].y);
-      aliens.push(alienType);
-    }, i * 500); // Spawn with delay
-  }
-}
-
-function updateAliens() {
-  let survivingAliens = []; // Track aliens that survive the wave
-
-  for (let i = aliens.length - 1; i >= 0; i--) {
-    let alien = aliens[i];
-    alien.update();
-    alien.display();
-    
-    if (alien.reachedBase()) {
-      baseHealth -= alien.damage; // Reduce base health if alien reaches the base
-      aliens.splice(i, 1); // Remove alien
-    } else if (alien.health <= 0) {
-      playerMoney += 10; // Give money for killing alien
-      aliens.splice(i, 1); // Remove dead alien
+    if (gameState.state === 'playing') {
+        updateGame();
+        drawGame();
+        checkGameOver();
+    } else if (gameState.state === 'gameWin') {
+        drawGameWin();
     } else {
-      survivingAliens.push(alien); // Add alien to surviving list if not killed
+        drawGameOver();
     }
-  }
-
-  // Progress to the next wave if all aliens are defeated or reach the base
-  if (aliens.length === 0 && !spawningWave) {
-    spawningWave = true; // Set flag to prevent multiple calls
-    wave++;
-    if (wave > 5) {
-      wave = 1;
-      level++;
-      generatePath(level); // Generate new path for the next level
-    }
-    evolveAliens(survivingAliens); // Evolve aliens for the next wave
-  }
 }
 
-function evolveAliens(survivingAliens) {
-  setTimeout(() => {
-    for (let i = 0; i < wave * 3; i++) {
-      setTimeout(() => {
-        if (survivingAliens.length > 0) {
-          // Select a random surviving alien as a "parent"
-          let parent = random(survivingAliens);
+function initializeTerritory() {
+    territory = [];
+    for (let i = 0; i < mapCols; i++) {
+        territory[i] = [];
+        for (let j = 0; j < mapRows; j++) {
+            territory[i][j] = 'neutral'; // 'neutral', 'player', 'alien'
+        }
+    }
+}
 
-          // Mutate attributes slightly to make aliens stronger
-          let speed = constrain(parent.speed + random(-0.5, 0.5), 1, 5);
-          let health = constrain(parent.health + random(-5, 10), 10, 100);
-          let damage = constrain(parent.damage + random(-1, 2), 5, 30);
+function generateMap() {
+    // Define tile types and their adjacency rules - removed water, reduced rock probability
+    let tileTypes = {
+        'ground': { adjacent: ['ground', 'rock'], color: [34, 139, 34] },
+        'rock': { adjacent: ['ground', 'rock'], color: [105, 105, 105] }
+    };
+    
+    // Initialize grid with all possibilities
+    let waveGrid = [];
+    for (let i = 0; i < mapCols; i++) {
+        waveGrid[i] = [];
+        for (let j = 0; j < mapRows; j++) {
+            // Weight the initial possibilities to favor ground over rock
+            let possibilities = [];
+            // Add ground multiple times to increase its probability
+            for (let k = 0; k < 9; k++) { // 8 ground vs 2 rock = 80% ground, 20% rock
+                possibilities.push('ground');
+            }
+            for (let k = 0; k < 1; k++) {
+                possibilities.push('rock');
+            }
+            waveGrid[i][j] = possibilities;
+        }
+    }
+    
+    // Simple WFC implementation
+    let maxIterations = mapCols * mapRows * 2; // Prevent infinite loops
+    let iterations = 0;
+    
+    while (!isFullyCollapsed(waveGrid) && iterations < maxIterations) {
+        let cell = findLowestEntropy(waveGrid);
+        if (cell) {
+            let chosenTile = random(waveGrid[cell.x][cell.y]);
+            waveGrid[cell.x][cell.y] = [chosenTile];
+            
+            // Propagate constraints to neighbors
+            propagateConstraints(waveGrid, cell.x, cell.y, tileTypes);
+        }
+        iterations++;
+    }
+    
+    // Convert to obstacles and store terrain
+    obstacles = [];
+    window.terrainGrid = []; // Store terrain for drawing
+    
+    for (let i = 0; i < mapCols; i++) {
+        window.terrainGrid[i] = [];
+        for (let j = 0; j < mapRows; j++) {
+            let tileType = waveGrid[i][j].length > 0 ? waveGrid[i][j][0] : 'ground';
+            window.terrainGrid[i][j] = tileType;
+            
+            if (tileType === 'rock') {
+                obstacles.push({x: i * cellSize, y: j * cellSize});
+            }
+        }
+    }
+}
 
-          // Create a new alien with mutated attributes
-          aliens.push(new Alien(path[0].x, path[0].y, speed, damage, health, true)); // Mark as mutated
-        } else {
-          // If no survivors, spawn default aliens
-          let alienType = random() > 0.5 ? new FastAlien(path[0].x, path[0].y) : new StrongAlien(path[0].x, path[0].y);
-          aliens.push(alienType);
+function isFullyCollapsed(grid) {
+    for (let i = 0; i < grid.length; i++) {
+        for (let j = 0; j < grid[i].length; j++) {
+            if (grid[i][j].length > 1) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function findLowestEntropy(grid) {
+    let minEntropy = Infinity;
+    let candidates = [];
+    
+    for (let i = 0; i < grid.length; i++) {
+        for (let j = 0; j < grid[i].length; j++) {
+            let entropy = grid[i][j].length;
+            if (entropy > 1 && entropy < minEntropy) {
+                minEntropy = entropy;
+                candidates = [{x: i, y: j}];
+            } else if (entropy === minEntropy && entropy > 1) {
+                candidates.push({x: i, y: j});
+            }
+        }
+    }
+    
+    return candidates.length > 0 ? random(candidates) : null;
+}
+
+function propagateConstraints(grid, x, y, tileTypes) {
+    let stack = [{x: x, y: y}];
+    
+    while (stack.length > 0) {
+        let current = stack.pop();
+        let currentTile = grid[current.x][current.y][0];
+        
+        // Check all 4 neighbors
+        let neighbors = [
+            {x: current.x - 1, y: current.y},
+            {x: current.x + 1, y: current.y},
+            {x: current.x, y: current.y - 1},
+            {x: current.x, y: current.y + 1}
+        ];
+        
+        for (let neighbor of neighbors) {
+            if (neighbor.x >= 0 && neighbor.x < grid.length && 
+                neighbor.y >= 0 && neighbor.y < grid[0].length) {
+                
+                if (grid[neighbor.x][neighbor.y].length > 1) {
+                    let oldLength = grid[neighbor.x][neighbor.y].length;
+                    
+                    // Filter neighbor possibilities based on current tile's adjacency rules
+                    grid[neighbor.x][neighbor.y] = grid[neighbor.x][neighbor.y].filter(tile => 
+                        tileTypes[currentTile].adjacent.includes(tile)
+                    );
+                    
+                    // If possibilities changed, add to stack for further propagation
+                    if (grid[neighbor.x][neighbor.y].length < oldLength && 
+                        grid[neighbor.x][neighbor.y].length > 0) {
+                        stack.push(neighbor);
+                    }
+                    
+                    // Handle contradiction (no valid tiles left)
+                    if (grid[neighbor.x][neighbor.y].length === 0) {
+                        grid[neighbor.x][neighbor.y] = ['ground']; // Fallback
+                    }
+                }
+            }
+        }
+    }
+}
+
+function initializeAlienGenes() {
+    alienGenes = [];
+    for (let i = 0; i < populationSize; i++) {
+        alienGenes.push({
+            health: random(50, 150),
+            speed: random(0.5, 2.5),
+            spawnSide: floor(random(4)) // 0=top, 1=right, 2=bottom, 3=left
+        });
+    }
+}
+
+function updateGame() {
+    // Handle alien spawning
+    handleSpawning();
+    
+    // Update aliens
+    for (let i = aliens.length - 1; i >= 0; i--) {
+        updateAlien(aliens[i]);
+
+        trackAlienPerformance(aliens[i]);
+        if (aliens[i].health <= 0) {
+            aliens.splice(i, 1);
+        }
+    }
+    
+    // Update turrets
+    for (let turret of turrets) {
+        updateTurret(turret);
+    }
+    
+    // Update projectiles
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        updateProjectile(projectiles[i]);
+        if (projectiles[i].life <= 0) {
+            projectiles.splice(i, 1);
+        }
+    }
+    
+    updateTerritory();
+    calculateCapturedPercent();
+    
+    // Check wave completion - only end wave if all aliens spawned AND all aliens are gone
+    if (gameState.waveActive && aliens.length < 2 && aliensToSpawn === 0) {
+        console.log("🏁 Wave complete - ending wave");
+        endWave();
+    }
+    
+    // Check game over condition
+    if (capturedPercent > 60) {
+        gameState.state = 'gameOver';
+        evolveAliens();
+    }
+}
+
+function handleSpawning() {
+    if (gameState.waveActive && aliensToSpawn > 0) {
+        spawnTimer++;
+        
+        if (spawnTimer >= spawnDelay) {
+            // Spawn an alien
+            spawnAlien();
+            console.log(`✨ Spawned alien ${aliens.length}, ${aliensToSpawn - 1} remaining`);
+            
+            aliensToSpawn--;
+            spawnTimer = 0; // Reset timer
+            
+            if (aliensToSpawn === 0) {
+                console.log("🎯 All aliens spawned for this wave");
+            }
+        }
+    }
+}
+
+function startWave() {
+    if (gameState.waveActive) {
+        console.log("❌ Cannot start wave - already active");
+        return;
+    }
+    
+    console.log(`🚀 Starting wave ${gameState.wave}`);
+    gameState.waveActive = true;
+    
+    // Set up spawning parameters
+    aliensToSpawn = 3 + 5*gameState.wave; // Increase aliens per wave
+    spawnTimer = 0;
+    spawnDelay = 90; // frames betwe en spawns
+    
+    console.log(`📋 Will spawn ${aliensToSpawn} aliens with ${spawnDelay} frame delay`);
+}
+
+function endWave() {
+    console.log(`🎊 Ending wave ${gameState.wave}`);
+    
+    gameState.waveActive = false;
+    gameState.wave++;
+    gameState.energy += 25;
+    
+    // Reset spawning variables
+    aliensToSpawn = 0;
+    spawnTimer = 0;
+    
+    // Clear aliens array
+    aliens = [];
+    
+    // Evolve aliens
+    evolveAliens();
+    
+    console.log(`✅ Wave ${gameState.wave - 1} completed`);
+    console.log(`📊 Ready for wave ${gameState.wave}. Press Space to start.`);
+}
+
+function checkObstacleCollision(x, y) {
+    // Check bounds
+    if (x < 0 || x >= width || y < 0 || y >= height) {
+        return true;
+    }
+    
+    // Check terrain grid for rocks - FIX: correct array indexing
+    if (window.terrainGrid) {
+        let gridX = floor(x / cellSize);
+        let gridY = floor(y / cellSize);
+        
+        if (gridX >= 0 && gridX < mapCols && gridY >= 0 && gridY < mapRows) {
+            return window.terrainGrid[gridX][gridY] === 'rock'; // Fixed: was [gridY][gridX]
+        }
+    }
+    
+    return false;
+}
+
+function updateAlien(alien) {
+    // Move toward target with improved collision detection
+    let dx = alien.target.x - alien.x;
+    let dy = alien.target.y - alien.y;
+    let distance = sqrt(dx * dx + dy * dy);
+    
+    if (distance > 5) {
+        // Calculate movement direction
+        let moveX = (dx / distance) * alien.speed;
+        let moveY = (dy / distance) * alien.speed;
+        
+        // Use smaller steps for collision detection to prevent tunneling
+        let steps = ceil(alien.speed); // Break movement into smaller steps
+        let stepX = moveX / steps;
+        let stepY = moveY / steps;
+        
+        let currentX = alien.x;
+        let currentY = alien.y;
+        let alienRadius = 7.5;
+        let collisionDetected = false;
+        
+        // Check each small step
+        for (let step = 0; step < steps; step++) {
+            let nextX = currentX + stepX;
+            let nextY = currentY + stepY;
+            
+            // Check collision at multiple points around the alien
+            let checkPoints = [
+                {x: nextX, y: nextY}, // center
+                {x: nextX - alienRadius, y: nextY - alienRadius}, // top-left
+                {x: nextX + alienRadius, y: nextY - alienRadius}, // top-right
+                {x: nextX - alienRadius, y: nextY + alienRadius}, // bottom-left
+                {x: nextX + alienRadius, y: nextY + alienRadius}  // bottom-right
+            ];
+            
+            let stepCollision = false;
+            for (let point of checkPoints) {
+                if (checkObstacleCollision(point.x, point.y)) {
+                    stepCollision = true;
+                    collisionDetected = true;
+                    break;
+                }
+            }
+            
+            if (stepCollision) {
+                break; // Stop moving if we hit an obstacle
+            }
+            
+            // Move to next step position
+            currentX = nextX;
+            currentY = nextY;
         }
         
-        // Reset the spawning flag when the last alien is spawned
-        if (i === wave * 3 - 1) {
-          spawningWave = false;
+        if (!collisionDetected) {
+            // Safe to move to final position
+            alien.x = currentX;
+            alien.y = currentY;
+        } else {
+            // Collision detected - try to move around obstacle
+            moveAroundObstacle(alien, dx, dy, distance);
         }
-      }, i * 500);
+    } else {
+        // Pick new target that's not on a rock
+        alien.target = findValidTarget();
     }
-  }, 2000); // Wait 2 seconds before next wave
-}
-
-function updateTowers() {
-  for (let tower of towers) {
-    tower.attack(aliens); // Attack aliens within range
-    tower.display();
-  }
-}
-
-function checkBaseHealth() {
-  if (baseHealth <= 0) {
-    noLoop(); // Stop the game
-    fill(255, 0, 0);
-    textSize(48);
-    textAlign(CENTER);
-    text("GAME OVER!", width/2, height/2);
-  }
-}
-
-function displayUI() {
-  // UI Background
-  fill(0, 0, 0, 150);
-  rect(10, 10, 300, 120);
-  
-  fill(255);
-  textAlign(LEFT);
-  textSize(16);
-  text(`Base Health: ${baseHealth}`, 20, 30);
-  text(`Money: $${playerMoney}`, 20, 50);
-  text(`Wave: ${wave}`, 20, 70);
-  text(`Level: ${level}`, 20, 90);
-  text(`Tower Cost: $${towerCost}`, 20, 110);
-}
-
-function drawUpgradePanel() {
-  if (selectedTower) {
-    // Upgrade panel background
-    fill(0, 0, 0, 200);
-    rect(width - 250, 50, 240, 200);
     
+    // Capture territory
+    let gridX = floor(alien.x / cellSize);
+    let gridY = floor(alien.y / cellSize);
+    if (gridX >= 0 && gridX < mapCols && gridY >= 0 && gridY < mapRows) {
+        territory[gridX][gridY] = 'alien';
+    }
+}
+
+function moveAroundObstacle(alien, dx, dy, distance) {
+    // Add a stuckCounter to track if alien is stuck
+    if (!alien.stuckCounter) alien.stuckCounter = 0;
+    if (!alien.lastPosition) alien.lastPosition = {x: alien.x, y: alien.y};
+    
+    // Check if alien hasn't moved much (is stuck)
+    let distanceMoved = sqrt((alien.x - alien.lastPosition.x)**2 + (alien.y - alien.lastPosition.y)**2);
+    if (distanceMoved < 1) {
+        alien.stuckCounter++;
+    } else {
+        alien.stuckCounter = 0;
+    }
+    
+    // If stuck for too long, pick a completely new target
+    if (alien.stuckCounter > 20) {
+        alien.target = findValidTarget();
+        alien.stuckCounter = 0;
+        alien.lastPosition = {x: alien.x, y: alien.y};
+        return;
+    }
+    
+    // Try moving perpendicular to the obstacle with smaller steps
+    let alienRadius = 7.5;
+    let avoidanceSpeed = alien.speed * 0.5; // Slower when avoiding obstacles
+    let perpX1 = -dy / distance * avoidanceSpeed;
+    let perpY1 = dx / distance * avoidanceSpeed;
+    let perpX2 = dy / distance * avoidanceSpeed;
+    let perpY2 = -dx / distance * avoidanceSpeed;
+    
+    // Try first perpendicular direction with step-by-step checking
+    if (canMoveTo(alien.x + perpX1, alien.y + perpY1, alienRadius)) {
+        alien.x += perpX1;
+        alien.y += perpY1;
+        alien.lastPosition = {x: alien.x, y: alien.y};
+    }
+    // Try second perpendicular direction
+    else if (canMoveTo(alien.x + perpX2, alien.y + perpY2, alienRadius)) {
+        alien.x += perpX2;
+        alien.y += perpY2;
+        alien.lastPosition = {x: alien.x, y: alien.y};
+    }
+    // Try moving at an angle (diagonal avoidance)
+    else {
+        let angleOffset = alien.stuckCounter * 0.2; // More dramatic angle changes
+        let newDx = dx * cos(angleOffset) - dy * sin(angleOffset);
+        let newDy = dx * sin(angleOffset) + dy * cos(angleOffset);
+        let newDistance = sqrt(newDx * newDx + newDy * newDy);
+        
+        if (newDistance > 0) {
+            let testX = alien.x + (newDx / newDistance) * avoidanceSpeed;
+            let testY = alien.y + (newDy / newDistance) * avoidanceSpeed;
+            
+            if (canMoveTo(testX, testY, alienRadius)) {
+                alien.x = testX;
+                alien.y = testY;
+                alien.lastPosition = {x: alien.x, y: alien.y};
+            }
+        }
+    }
+}
+
+function canMoveTo(x, y, radius) {
+    // Check multiple points around the alien's intended position
+    let checkPoints = [
+        {x: x, y: y}, // center
+        {x: x - radius, y: y - radius}, // top-left
+        {x: x + radius, y: y - radius}, // top-right
+        {x: x - radius, y: y + radius}, // bottom-left
+        {x: x + radius, y: y + radius}, // bottom-right
+        {x: x - radius, y: y}, // left
+        {x: x + radius, y: y}, // right
+        {x: x, y: y - radius}, // top
+        {x: x, y: y + radius}  // bottom
+    ];
+    
+    for (let point of checkPoints) {
+        if (checkObstacleCollision(point.x, point.y)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+function findValidTarget() {
+    let attempts = 0;
+    let target = { x: random(width), y: random(height) };
+    
+    // Try up to 50 times to find a valid target
+    while (attempts < 70) {
+        target = { 
+            x: random(cellSize, width - cellSize), 
+            y: random(cellSize, height - cellSize) 
+        };
+        
+        // Check a small area around the target, not just the exact point
+        let validTarget = true;
+        for (let offsetX = -10; offsetX <= 10; offsetX += 5) {
+            for (let offsetY = -10; offsetY <= 10; offsetY += 5) {
+                if (checkObstacleCollision(target.x + offsetX, target.y + offsetY)) {
+                    validTarget = false;
+                    break;
+                }
+            }
+            if (!validTarget) break;
+        }
+        
+        if (validTarget) {
+            break;
+        }
+        
+        attempts++;
+    }
+    
+    return target;
+}
+
+function spawnAlien() {
+    let gene = random(alienGenes);
+    let alien = {
+        x: 0,
+        y: 0,
+        health: gene.health,
+        maxHealth: gene.health,
+        speed: gene.speed,
+        target: findValidTarget(),
+        captureRadius: 30,
+        stuckCounter: 0,
+        lastPosition: {x: 0, y: 0}
+    };
+    
+    // Set spawn position based on gene, avoiding rocks
+    let spawnAttempts = 0;
+    let validSpawn = false;
+    
+    while (!validSpawn && spawnAttempts < 50) {
+        switch(gene.spawnSide) {
+            case 0: // top
+                alien.x = random(20, width - 20);
+                alien.y = 20;
+                break;
+            case 1: // right
+                alien.x = width - 20;
+                alien.y = random(20, height - 20);
+                break;
+            case 2: // bottom
+                alien.x = random(20, width - 20);
+                alien.y = height - 20;
+                break;
+            case 3: // left
+                alien.x = 20;
+                alien.y = random(20, height - 20);
+                break;
+        }
+        
+        // Check if spawn position is clear (including area around alien)
+        validSpawn = true;
+        for (let offsetX = -10; offsetX <= 10; offsetX += 5) {
+            for (let offsetY = -10; offsetY <= 10; offsetY += 5) {
+                if (checkObstacleCollision(alien.x + offsetX, alien.y + offsetY)) {
+                    validSpawn = false;
+                    break;
+                }
+            }
+            if (!validSpawn) break;
+        }
+        
+        spawnAttempts++;
+    }
+    
+    // If we couldn't find a valid spawn position, try center of map
+    if (!validSpawn) {
+        alien.x = width / 2;
+        alien.y = height / 2;
+    }
+    
+    alien.lastPosition = {x: alien.x, y: alien.y};
+    aliens.push(alien);
+}
+
+// Replace the updateTurret function with this version:
+function updateTurret(turret) {
+    // Check if turret should explode based on surrounding alien territory
+    let gridX = floor(turret.x / cellSize);
+    let gridY = floor(turret.y / cellSize);
+    
+    if (gridX >= 0 && gridX < mapCols && gridY >= 0 && gridY < mapRows) {
+        // Check the 3x3 grid around the turret (9 tiles total)
+        let alienTileCount = 0;
+        let totalTilesChecked = 0;
+        
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                let checkX = gridX + dx;
+                let checkY = gridY + dy;
+                
+                // Make sure we're within bounds
+                if (checkX >= 0 && checkX < mapCols && checkY >= 0 && checkY < mapRows) {
+                    totalTilesChecked++;
+                    if (territory[checkX][checkY] === 'alien') {
+                        alienTileCount++;
+                    }
+                }
+            }
+        }
+        
+        // Calculate percentage of alien tiles
+        let alienPercentage = alienTileCount / totalTilesChecked;
+        
+        // If 40% or more of surrounding tiles are alien, destroy the turret
+        if (alienPercentage >= 0.3) {
+            let index = turrets.indexOf(turret);
+            if (index > -1) {
+                turrets.splice(index, 1);
+                console.log(`${turret.type} turret destroyed! ${alienTileCount}/${totalTilesChecked} surrounding tiles were alien (${(alienPercentage * 100).toFixed(1)}%)`);
+            }
+            return; // Exit early since turret is destroyed
+        }
+    }
+    
+    // Normal turret behavior if not destroyed
+    if (turret.type === 'combat') {
+        // Combat turret behavior
+        let nearest = null;
+        let minDist = turret.range;
+        
+        for (let alien of aliens) {
+            let dist = sqrt((alien.x - turret.x) ** 2 + (alien.y - turret.y) ** 2);
+            if (dist < minDist) {
+                nearest = alien;
+                minDist = dist;
+            }
+        }
+        
+        // Shoot at nearest alien
+        if (nearest && frameCount % turret.fireRate === 0) {
+            projectiles.push({
+                x: turret.x,
+                y: turret.y,
+                target: nearest,
+                speed: 5,
+                damage: turret.damage,
+                life: 100
+            });
+        }
+    } else if (turret.type === 'money') {
+        // Money turret behavior
+        if (frameCount - turret.lastMoneyTime >= turret.moneyInterval) {
+            gameState.money += turret.moneyGeneration;
+            turret.lastMoneyTime = frameCount;
+            console.log(`Money turret generated $${turret.moneyGeneration}! Total: $${gameState.money}`);
+        }
+    }
+}
+
+function updateProjectile(projectile) {
+    if (projectile.target && projectile.target.health > 0) {
+        let dx = projectile.target.x - projectile.x;
+        let dy = projectile.target.y - projectile.y;
+        let dist = sqrt(dx * dx + dy * dy);
+        
+        if (dist < 10) {
+            // Hit target
+            projectile.target.health -= projectile.damage;
+            projectile.life = 0;
+        } else {
+            // Move toward target
+            projectile.x += (dx / dist) * projectile.speed;
+            projectile.y += (dy / dist) * projectile.speed;
+        }
+    }
+    
+    projectile.life--;
+}
+
+function updateTerritory() {
+    // Slowly convert alien territory back to neutral
+    if (frameCount % 300 === 0) {
+        for (let i = 0; i < mapCols; i++) {
+            for (let j = 0; j < mapRows; j++) {
+                if (territory[i][j] === 'alien' && random() < 0.1) {
+                    territory[i][j] = 'neutral';
+                }
+            }
+        }
+    }
+}
+
+function calculateCapturedPercent() {
+    let alienCells = 0;
+    let totalCells = mapCols * mapRows;
+    
+    for (let i = 0; i < mapCols; i++) {
+        for (let j = 0; j < mapRows; j++) {
+            if (territory[i][j] === 'alien') {
+                alienCells++;
+            }
+        }
+    }
+    
+    capturedPercent = (alienCells / totalCells) * 100;
+}
+
+function checkGameOver() {
+    if (capturedPercent > 60) {
+        gameState.state = 'gameOver';
+        evolveAliens();
+    }
+    if (gameState.money < moneyTurretCost && turrets.filter(t => t.type === 'money').length === 0) {
+        gameState.state = 'gameOver2';
+        evolveAliens();
+    }
+    if (gameState.wave === 25 && aliens.length === 0) { 
+        gameState.state = 'gameWin';
+    }
+}
+function trackAlienPerformance(alien) {
+    // Track when alien dies and calculate survival time
+    if (!alien.spawnTime) {
+        alien.spawnTime = frameCount;
+    }
+    
+    if (alien.health <= 0) {
+        gameState.money += 100; // Reward for killing alien
+        alien.survivalTime = frameCount - alien.spawnTime;
+        // Store performance data for genetic algorithm
+        if (!alien.geneIndex && alien.geneIndex !== 0) {
+            // Find which gene this alien came from
+            for (let i = 0; i < alienGenes.length; i++) {
+                if (alienGenes[i].health === alien.maxHealth && 
+                    alienGenes[i].speed === alien.speed) {
+                    alien.geneIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        if (alien.geneIndex !== undefined) {
+            if (!alienGenes[alien.geneIndex].totalSurvivalTime) {
+                alienGenes[alien.geneIndex].totalSurvivalTime = 0;
+                alienGenes[alien.geneIndex].spawnCount = 0;
+            }
+            alienGenes[alien.geneIndex].totalSurvivalTime += alien.survivalTime;
+            alienGenes[alien.geneIndex].spawnCount++;
+        }
+    }
+}
+
+function evolveAliens() {
+    // Enhanced genetic algorithm using performance data
+    let newGenes = [];
+    
+    // Calculate fitness scores based on performance
+    for (let gene of alienGenes) {
+        if (gene.spawnCount > 0) {
+            gene.avgSurvivalTime = gene.totalSurvivalTime / gene.spawnCount;
+            gene.fitness = gene.avgSurvivalTime + (gene.health * 0.1) + (gene.speed * 10);
+        } else {
+            gene.fitness = gene.health * 0.1; // Fallback for unspawned genes
+        }
+    }
+    
+    // Sort by fitness instead of just health
+    alienGenes.sort((a, b) => (b.fitness || 0) - (a.fitness || 0));
+    
+    // Keep best performers
+    for (let i = 0; i < populationSize / 2; i++) {
+        newGenes.push({...alienGenes[i]}); // Copy to avoid reference issues
+    }
+    
+    // Create offspring with mutations
+    while (newGenes.length < populationSize) {
+        let parent1 = random(newGenes);
+        let parent2 = random(newGenes);
+        
+        let child = {
+            health: lerp(parent1.health, parent2.health, 0.5),
+            speed: lerp(parent1.speed, parent2.speed, 0.5),
+            spawnSide: random() < 0.5 ? parent1.spawnSide : parent2.spawnSide
+        };
+        
+        // Mutation
+        if (random() < mutationRate) {
+            child.health += random(-20, 20);
+            child.speed += random(-0.5, 0.5);
+            child.spawnSide = floor(random(4));
+        }
+        
+        // Clamp values to reasonable ranges
+        child.health = constrain(child.health, 30, 200);
+        child.speed = constrain(child.speed, 0.3, 3.0);
+        
+        newGenes.push(child);
+    }
+    
+    alienGenes = newGenes;
+    console.log(`🧬 Evolution complete. Best fitness: ${alienGenes[0].fitness?.toFixed(1) || 'N/A'}`);
+} 
+
+function drawGame() {
+    // Draw terrain using WFC results
+    if (window.terrainGrid) {
+        let tileColors = {
+            'ground': [34, 139, 34],   // Forest green
+            'rock': [105, 105, 105]    // Gray
+        };
+        
+        for (let i = 0; i < mapCols; i++) {
+            for (let j = 0; j < mapRows; j++) {
+                let tileType = window.terrainGrid[i][j];
+                let color = tileColors[tileType] || [34, 139, 34];
+                fill(color[0], color[1], color[2]);
+                noStroke();
+                rect(i * cellSize, j * cellSize, cellSize, cellSize);
+            }
+        }
+    }
+    
+    // Draw territory overlay
+    for (let i = 0; i < mapCols; i++) {
+        for (let j = 0; j < mapRows; j++) {
+            if (territory[i][j] === 'alien') {
+                fill(255, 0, 0, 100);
+                rect(i * cellSize, j * cellSize, cellSize, cellSize);
+            } else if (territory[i][j] === 'player') {
+                fill(0, 255, 0, 100);
+                rect(i * cellSize, j * cellSize, cellSize, cellSize);
+            }
+        }
+    }
+    
+    // Draw aliens with movement lines
+    for (let alien of aliens) {
+        // Draw line to target (for debugging pathfinding)
+        stroke(255, 255, 0, 100);
+        strokeWeight(1);
+        line(alien.x, alien.y, alien.target.x, alien.target.y);
+        
+        // Draw alien
+        fill(255, 0, 0);
+        noStroke();
+        ellipse(alien.x, alien.y, 15, 15);
+        
+        // Health bar
+        fill(255);
+        rect(alien.x - 10, alien.y - 20, 20, 3);
+        fill(0, 255, 0);
+        rect(alien.x - 10, alien.y - 20, 20 * (alien.health / alien.maxHealth), 3);
+    }
+    
+    // Draw turrets with different visuals for each type
+    noStroke();
+    for (let turret of turrets) {
+        if (turret.type === 'combat') {
+            fill(0, 0, 255); // Blue for combat turrets
+            rect(turret.x - 10, turret.y - 10, 20, 20);
+            
+            // Draw range circle when selected
+            if (selectedTurretType === 'combat') {
+                stroke(0, 0, 255, 100);
+                strokeWeight(1);
+                noFill();
+                ellipse(turret.x, turret.y, turret.range * 2);
+                noStroke();
+            }
+        } else if (turret.type === 'money') {
+            fill(255, 215, 0); // Gold for money turrets
+            rect(turret.x - 10, turret.y - 10, 20, 20);
+            
+            // Draw dollar sign
+            fill(0);
+            textAlign(CENTER);
+            textSize(12);
+            text('$', turret.x, turret.y + 4);
+            textAlign(LEFT);
+            
+            // Draw progress bar for money generation
+            let progress = (frameCount - turret.lastMoneyTime) / turret.moneyInterval;
+            fill(0, 255, 0, 150);
+            rect(turret.x - 10, turret.y + 12, 20 * progress, 3);
+        }
+    }
+    
+    // Draw projectiles
+    fill(255, 255, 0);
+    for (let projectile of projectiles) {
+        ellipse(projectile.x, projectile.y, 5, 5);
+    }
+    
+    // Draw UI
     fill(255);
-    textAlign(CENTER);
-    textSize(18);
-    text("Tower Upgrades", width - 130, 75);
+    textSize(16);
+    text(`Territory Captured: ${capturedPercent.toFixed(1)}%`, 10, 20);
+    text(`Aliens: ${aliens.length}`, 10, 40);
+    text(`Turrets: ${turrets.length}`, 10, 60);
+    text(`Wave: ${gameState.wave}`, 150, 60);
+    text('Money: $' + gameState.money, 150, 40);
     
+    // Turret selection buttons
     textSize(14);
-    text(`Damage: ${selectedTower.damage}`, width - 130, 100);
-    text(`Fire Rate: ${60/selectedTower.fireRate}`, width - 130, 120);
     
-    // Upgrade buttons
-    fill(100, 150, 255);
-    rect(width - 230, 140, 100, 30);
-    rect(width - 120, 140, 100, 30);
+    // Combat turret button
+    if (selectedTurretType === 'combat') {
+        fill(0, 0, 255, 150); // Highlighted
+    } else {
+        fill(100, 100, 100, 150);
+    }
+    rect(10, 120, 110, 30);
+    fill(255);
+    text(`Combat ($${combatTurretCost})`, 15, 140);
+    
+    // Money turret button
+    if (selectedTurretType === 'money') {
+        fill(255, 215, 0, 150); // Highlighted
+    } else {
+        fill(100, 100, 100, 150);
+    }
+    rect(130, 120, 110, 30);
+    fill(255);
+    text(`Money ($${moneyTurretCost})`, 135, 140);
+    
+    // Show turret info
+    textSize(12);
+    if (selectedTurretType === 'combat') {
+        text('Combat: Shoots aliens', 10, 165);
+        text('Range: 100, Damage: 25', 10, 180);
+    } else {
+        text('Money: Generates $50 every 5s', 10, 165);
+        text('Can be destroyed by aliens', 10, 180);
+    }
+    
+    // Show wave status
+    textSize(16);
+    if (!gameState.waveActive) {
+        text(`Press SPACE to start wave ${gameState.wave}`, 10, 210);
+    } else {
+        text(`Aliens to spawn: ${aliensToSpawn}`, 10, 210);
+        text(`Spawn timer: ${spawnTimer}/${spawnDelay}`, 10, 230);
+    }
+}
+
+function drawGameOver() {
+    
+    fill(255, 0, 0, 150);
+    rect(0, 0, width, height);
     
     fill(255);
-    text("Upgrade Damage", width - 180, 160);
-    text("($50)", width - 180, 175);
-    text("Upgrade Fire Rate", width - 70, 160);
-    text("($30)", width - 70, 175);
+    textAlign(CENTER);
+    textSize(32);
+    text("GAME OVER", width/2, height/2);
+    if (gameState.state === 'gameOver2') {
+        text("Humans have run out of money!", width/2, height/2 + 40);
+    } else {
+        text("Humans have lost control of Earth!", width/2, height/2 + 40);
+    }
+    text("Press R to restart", width/2, height/2 + 80);
+    textAlign(LEFT);
+}
+
+function drawGameWin() {
+    fill(34, 209, 31, 150);
+    rect(0, 0, width, height);
     
-    // Close button
-    fill(255, 100, 100);
-    rect(width - 230, 200, 200, 30);
     fill(255);
-    text("Close", width - 130, 220);
-  }
+    textAlign(CENTER);
+    textSize(32);
+    text("Humans win!", width/2, height/2);
+    text("Player has fended off the Alien Attacks!", width/2, height/2 + 40);
+    text("Press R to restart", width/2, height/2 + 80);
+    textAlign(LEFT);
 }
 
 function mousePressed() {
-  // Check upgrade panel clicks
-  if (selectedTower) {
-    // Damage upgrade button
-    if (mouseX > width - 230 && mouseX < width - 130 && mouseY > 140 && mouseY < 170) {
-      if (playerMoney >= 50) {
-        selectedTower.damage += 5;
-        playerMoney -= 50;
-      }
-      return;
+    // Check if clicking on turret selection buttons
+    if (mouseX >= 10 && mouseX <= 120 && mouseY >= 120 && mouseY <= 150) {
+        // Combat turret button
+        selectedTurretType = 'combat';
+        return;
+    } else if (mouseX >= 130 && mouseX <= 240 && mouseY >= 120 && mouseY <= 150) {
+        // Money turret button
+        selectedTurretType = 'money';
+        return;
     }
-    // Fire rate upgrade button
-    if (mouseX > width - 120 && mouseX < width - 20 && mouseY > 140 && mouseY < 170) {
-      if (playerMoney >= 30) {
-        selectedTower.fireRate = max(5, selectedTower.fireRate - 3);
-        playerMoney -= 30;
-      }
-      return;
-    }
-    // Close button
-    if (mouseX > width - 230 && mouseX < width - 30 && mouseY > 200 && mouseY < 230) {
-      selectedTower = null;
-      return;
-    }
-  }
-  
-  // Check if clicking on existing tower
-  for (let tower of towers) {
-    if (dist(mouseX, mouseY, tower.x, tower.y) < 20) {
-      selectedTower = tower;
-      return;
-    }
-  }
-  
-  // Place a tower if the player has enough money
-  if (playerMoney >= towerCost) {
-    towers.push(new Tower(mouseX, mouseY));
-    playerMoney -= towerCost;
-  }
-}
-
-class Alien {
-  constructor(x, y, speed, damage, health, mutated = false) {
-    this.x = x;
-    this.y = y;
-    this.speed = speed;
-    this.damage = damage;
-    this.health = health;
-    this.maxHealth = health;
-    this.pathIndex = 0; // Current point in the path
-    this.mutated = mutated; // Flag to indicate if the alien is mutated
-  }
-
-  update() {
-    // Move toward the next point in the path
-    if (this.pathIndex < path.length - 1) {
-      let target = path[this.pathIndex + 1];
-      let dx = target.x - this.x;
-      let dy = target.y - this.y;
-      let distToTarget = sqrt(dx * dx + dy * dy);
-      if (distToTarget < 10) {
-        this.pathIndex++;
-      } else {
-        this.x += (dx / distToTarget) * this.speed;
-        this.y += (dy / distToTarget) * this.speed;
-      }
-    }
-  }
-
-  display() {
-    // Health bar
-    let barWidth = 20;
-    let barHeight = 4;
-    fill(255, 0, 0);
-    rect(this.x - barWidth/2, this.y - 15, barWidth, barHeight);
-    fill(0, 255, 0);
-    rect(this.x - barWidth/2, this.y - 15, (this.health/this.maxHealth) * barWidth, barHeight);
     
-    // Alien body
-    if (this.mutated) {
-      fill(255, 0, 255); // Purple color for mutated aliens
-      stroke(255, 100, 255);
-    } else {
-      fill(255, 0, 0); // Red color for normal aliens
-      stroke(255, 100, 100);
-    }
-    strokeWeight(2);
-    ellipse(this.x, this.y, 20, 20);
-    
-    // Eyes
-    fill(255);
-    ellipse(this.x - 5, this.y - 3, 4, 4);
-    ellipse(this.x + 5, this.y - 3, 4, 4);
-  }
-
-  reachedBase() {
-    return this.pathIndex >= path.length - 1;
-  }
-}
-
-class FastAlien extends Alien {
-  constructor(x, y, mutated = false) {
-    super(x, y, 4, 5, 20, mutated); // Faster speed, lower damage, lower health
-  }
-
-  display() {
-    // Health bar
-    let barWidth = 20;
-    let barHeight = 4;
-    fill(255, 0, 0);
-    rect(this.x - barWidth/2, this.y - 15, barWidth, barHeight);
-    fill(0, 255, 0);
-    rect(this.x - barWidth/2, this.y - 15, (this.health/this.maxHealth) * barWidth, barHeight);
-    
-    if (this.mutated) {
-      fill(100, 100, 255); // Light blue for mutated fast aliens
-      stroke(150, 150, 255);
-    } else {
-      fill(0, 0, 255); // Blue color for fast aliens
-      stroke(100, 100, 255);
-    }
-    strokeWeight(2);
-    ellipse(this.x, this.y, 18, 18);
-    
-    // Speed lines
-    stroke(255);
-    strokeWeight(1);
-    line(this.x - 15, this.y, this.x - 10, this.y);
-    line(this.x - 15, this.y - 3, this.x - 8, this.y - 3);
-    line(this.x - 15, this.y + 3, this.x - 8, this.y + 3);
-  }
-}
-
-class StrongAlien extends Alien {
-  constructor(x, y, mutated = false) {
-    super(x, y, 2, 15, 50, mutated); // Slower speed, higher damage, higher health
-  }
-
-  display() {
-    // Health bar
-    let barWidth = 25;
-    let barHeight = 5;
-    fill(255, 0, 0);
-    rect(this.x - barWidth/2, this.y - 20, barWidth, barHeight);
-    fill(0, 255, 0);
-    rect(this.x - barWidth/2, this.y - 20, (this.health/this.maxHealth) * barWidth, barHeight);
-    
-    if (this.mutated) {
-      fill(100, 255, 100); // Light green for mutated strong aliens
-      stroke(150, 255, 150);
-    } else {
-      fill(0, 255, 0); // Green color for strong aliens
-      stroke(100, 255, 100);
-    }
-    strokeWeight(3);
-    ellipse(this.x, this.y, 25, 25);
-    
-    // Armor spikes
-    fill(200);
-    triangle(this.x, this.y - 12, this.x - 3, this.y - 8, this.x + 3, this.y - 8);
-    triangle(this.x - 10, this.y - 5, this.x - 6, this.y - 8, this.x - 6, this.y - 2);
-    triangle(this.x + 10, this.y - 5, this.x + 6, this.y - 8, this.x + 6, this.y - 2);
-  }
-}
-
-class Tower {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.range = 100; // Attack range
-    this.damage = 20; // Damage dealt to aliens
-    this.projectiles = []; // Array to store projectiles
-    this.fireRate = 30; // Frames between shots
-    this.lastShot = 0; // Track the last frame a shot was fired
-  }
-
-  attack(aliens) {
-    // Fire projectiles at aliens in range
-    if (frameCount - this.lastShot >= this.fireRate) {
-      for (let alien of aliens) {
-        let d = dist(this.x, this.y, alien.x, alien.y);
-        if (d < this.range) {
-          this.projectiles.push(new Projectile(this.x, this.y, alien, this.damage));
-          this.lastShot = frameCount; // Update last shot time
-          break; // Shoot at one alien per frame
+    // Place turret based on selection
+    if (gameState.state === 'playing') {
+        let turretCost = selectedTurretType === 'combat' ? combatTurretCost : moneyTurretCost;
+        
+        if (gameState.money >= turretCost) {
+            // Check if position is clear
+            let validPlacement = true;
+            
+            // Check against obstacles
+            for (let obstacle of obstacles) {
+                if (mouseX >= obstacle.x && mouseX <= obstacle.x + cellSize &&
+                    mouseY >= obstacle.y && mouseY <= obstacle.y + cellSize) {
+                    validPlacement = false;
+                    break;
+                }
+            }
+            
+            // Check against existing turrets
+            for (let turret of turrets) {
+                let dist = sqrt((mouseX - turret.x)**2 + (mouseY - turret.y)**2);
+                if (dist < 30) { // Minimum distance between turrets
+                    validPlacement = false;
+                    break;
+                }
+            }
+            
+            if (validPlacement) {
+                gameState.money -= turretCost;
+                
+                if (selectedTurretType === 'combat') {
+                    turrets.push({
+                        x: mouseX,
+                        y: mouseY,
+                        type: 'combat',
+                        range: 100,
+                        damage: 25,
+                        fireRate: 20
+                    });
+                    combatTurretCost += 20
+                } else {
+                    turrets.push({
+                        x: mouseX,
+                        y: mouseY,
+                        type: 'money',
+                        moneyGeneration: 50,
+                        lastMoneyTime: frameCount,
+                        moneyInterval: 300 // 5 seconds at 60 FPS
+                    });
+                    moneyTurretCost += 50;
+                }
+                
+                console.log(`Placed ${selectedTurretType} turret for $${turretCost}`);
+            } else {
+                console.log("Cannot place turret here - invalid location");
+            }
+        } else {
+            console.log(`Not enough money for ${selectedTurretType} turret ($${turretCost})`);
         }
-      }
     }
-
-    // Update and display projectiles
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      let projectile = this.projectiles[i];
-      projectile.update();
-      projectile.display();
-      if (projectile.hitTarget()) {
-        projectile.target.health -= projectile.damage; // Deal damage to the alien
-        this.projectiles.splice(i, 1); // Remove projectile after hitting target
-      } else if (projectile.outOfBounds()) {
-        this.projectiles.splice(i, 1); // Remove projectile if it goes out of bounds
-      }
-    }
-  }
-
-  display() {
-    // Tower base
-    fill(100, 100, 100);
-    stroke(150);
-    strokeWeight(2);
-    ellipse(this.x, this.y, 35, 35);
-    
-    // Tower turret
-    fill(0, 200, 0);
-    ellipse(this.x, this.y, 25, 25);
-    
-    // Tower barrel
-    fill(50);
-    rect(this.x - 2, this.y - 15, 4, 15);
-    
-    // Range indicator when selected
-    if (selectedTower === this) {
-      noFill();
-      stroke(0, 255, 0, 100);
-      strokeWeight(2);
-      ellipse(this.x, this.y, this.range * 2, this.range * 2);
-    }
-  }
 }
 
-class Projectile {
-  constructor(x, y, target, damage) {
-    this.x = x;
-    this.y = y;
-    this.target = target; // Target alien
-    this.damage = damage; // Damage dealt to the target
-    this.speed = 8; // Speed of the projectile
-  }
-
-  update() {
-    // Move toward the target
-    let dx = this.target.x - this.x;
-    let dy = this.target.y - this.y;
-    let distToTarget = sqrt(dx * dx + dy * dy);
-    this.x += (dx / distToTarget) * this.speed;
-    this.y += (dy / distToTarget) * this.speed;
-  }
-
-  display() {
-    fill(255, 255, 0);
-    stroke(255, 200, 0);
-    strokeWeight(2);
-    ellipse(this.x, this.y, 8, 8); // Draw the projectile
-  }
-
-  hitTarget() {
-    // Check if the projectile hits the target
-    return dist(this.x, this.y, this.target.x, this.target.y) < 12;
-  }
-
-  outOfBounds() {
-    // Check if the projectile goes out of bounds
-    return this.x < 0 || this.x > width || this.y < 0 || this.y > height;
-  }
+function keyPressed() {
+    if (key === ' ') {
+        startWave();
+    } else if (key === 'r' || key === 'R') {
+        // Restart game
+        gameState.state = 'playing';
+        gameState.wave = 1;
+        gameState.waveActive = false;
+        gameState.money = 200; // Reset money
+        aliens = [];
+        turrets = [];
+        projectiles = [];
+        capturedPercent = 0;
+        aliensToSpawn = 0;
+        spawnTimer = 0;
+        selectedTurretType = 'combat'; // Reset selection
+        initializeTerritory();
+        generateMap();
+    } else if (key === '1') {
+        selectedTurretType = 'combat';
+    } else if (key === '2') {
+        selectedTurretType = 'money';
+    }
 }
 
