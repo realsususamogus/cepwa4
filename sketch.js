@@ -15,6 +15,7 @@ let turrets = [];
 let projectiles = [];
 let alienGenes = [];
 let capturedPercent = 0;
+let explosions = [];
 
 // Map settings
 let mapWidth = 800;
@@ -23,9 +24,6 @@ let cellSize = 20;
 let mapCols, mapRows;
 let obstacles = [];
 const GRID_SIZE = 25;
-
-
-
 
 // Turret selection variables
 let selectedTurretType = 'combat'; // 'combat' or 'money'
@@ -104,8 +102,6 @@ function draw() {
     }
 }
 
-
-
 function updateGame() {
     // Handle alien spawning
     handleSpawning();
@@ -123,6 +119,20 @@ function updateGame() {
     // Update turrets
     for (let turret of turrets) {
         updateTurret(turret);
+    }
+    
+    // Update explosions
+    for (let i = explosions.length - 1; i >= 0; i--) {
+        let explosion = explosions[i];
+        
+        // Expand the explosion radius
+        explosion.radius = (explosion.maxRadius * (explosion.maxLife - explosion.life)) / explosion.maxLife;
+        explosion.life--;
+        
+        // Remove explosion when it's finished
+        if (explosion.life <= 0) {
+            explosions.splice(i, 1);
+        }
     }
     
     // Update projectiles
@@ -149,7 +159,6 @@ function updateGame() {
     }
 }
 
-
 function startWave() {
     if (gameState.waveActive) {
         console.log("❌ Cannot start wave - already active");
@@ -162,7 +171,7 @@ function startWave() {
     // Set up spawning parameters
     aliensToSpawn = 3 + 5*gameState.wave; // Increase aliens per wave
     spawnTimer = 0;
-    spawnDelay = 90; // frames betwe en spawns
+   
     
     console.log(`📋 Will spawn ${aliensToSpawn} aliens with ${spawnDelay} frame delay`);
 }
@@ -177,7 +186,8 @@ function endWave() {
     // Reset spawning variables
     aliensToSpawn = 0;
     spawnTimer = 0;
-    
+    spawnDelay -= 3
+    2
     // Clear aliens array
     aliens = [];
     
@@ -188,8 +198,6 @@ function endWave() {
     console.log(`📊 Ready for wave ${gameState.wave}. Press Space to start.`);
 }
 
-
-// Replace the updateTurret function with this version:
 function updateTurret(turret) {
     // Check if turret should explode based on surrounding alien territory
     let gridX = floor(turret.x / cellSize);
@@ -218,11 +226,22 @@ function updateTurret(turret) {
         // Calculate percentage of alien tiles
         let alienPercentage = alienTileCount / totalTilesChecked;
         
-        // If 40% or more of surrounding tiles are alien, destroy the turret
+        // If 30% or more of surrounding tiles are alien, destroy the turret
         if (alienPercentage >= 0.3) {
             let index = turrets.indexOf(turret);
             if (index > -1) {
+                // Create explosion effect before removing turret
+                explosions.push({
+                    x: turret.x,
+                    y: turret.y,
+                    radius: 0,
+                    maxRadius: 60,
+                    life: 60, // frames to live
+                    maxLife: 60
+                });
+                
                 turrets.splice(index, 1);
+                
                 console.log(`${turret.type} turret destroyed! ${alienTileCount}/${totalTilesChecked} surrounding tiles were alien (${(alienPercentage * 100).toFixed(1)}%)`);
             }
             return; // Exit early since turret is destroyed
@@ -256,7 +275,7 @@ function updateTurret(turret) {
         }
     } else if (turret.type === 'money') {
         // Money turret behavior
-        if (frameCount - turret.lastMoneyTime >= turret.moneyInterval) {
+        if (frameCount - turret.lastMoneyTime >= turret.moneyInterval && aliens.length > 1) {
             gameState.money += turret.moneyGeneration;
             turret.lastMoneyTime = frameCount;
             console.log(`Money turret generated $${turret.moneyGeneration}! Total: $${gameState.money}`);
@@ -283,8 +302,6 @@ function updateProjectile(projectile) {
     
     projectile.life--;
 }
-
-
 
 function checkGameOver() {
     if (capturedPercent > 60) {
@@ -381,6 +398,33 @@ function drawGame() {
             let progress = (frameCount - turret.lastMoneyTime) / turret.moneyInterval;
             fill(0, 255, 0, 150);
             rect(turret.x - 10, turret.y + 12, 20 * progress, 3);
+        }
+    }
+    
+    // Draw explosions
+    for (let explosion of explosions) {
+        let alpha = (explosion.life / explosion.maxLife) * 255; // Fade out over time
+        
+        // Outer orange circle
+        fill(255, 165, 0, alpha * 0.6); // Orange with transparency
+        noStroke();
+        ellipse(explosion.x, explosion.y, explosion.radius * 2);
+        
+        // Inner bright yellow/white circle
+        fill(255, 255, 100, alpha); // Bright yellow
+        ellipse(explosion.x, explosion.y, explosion.radius * 1.2);
+        
+        // Core white flash
+        fill(255, 255, 255, alpha * 0.8); // White core
+        ellipse(explosion.x, explosion.y, explosion.radius * 0.6);
+        
+        // Optional: Add some sparkle effects
+        fill(255, 200, 0, alpha);
+        for (let i = 0; i < 8; i++) {
+            let angle = (i / 8) * TWO_PI;
+            let sparkleX = explosion.x + cos(angle) * explosion.radius * 0.8;
+            let sparkleY = explosion.y + sin(angle) * explosion.radius * 0.8;
+            ellipse(sparkleX, sparkleY, 4);
         }
     }
     
@@ -554,10 +598,13 @@ function keyPressed() {
         aliens = [];
         turrets = [];
         projectiles = [];
+        explosions = []; // Clear explosions on restart
         capturedPercent = 0;
         aliensToSpawn = 0;
         spawnTimer = 0;
         selectedTurretType = 'combat'; 
+        combatTurretCost = 70;
+        moneyTurretCost = 100;
         initializeTerritory();
         generateMap();
     } else if (key === '1') {

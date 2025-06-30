@@ -154,7 +154,7 @@ function updateTerritory() {
 
 function calculateCapturedPercent() {
     let alienCells = 0;
-    let totalCells = mapCols * mapRows;
+    let totalCells = mapCols * mapRows * 0.8;
     
     for (let i = 0; i < mapCols; i++) {
         for (let j = 0; j < mapRows; j++) {
