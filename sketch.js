@@ -153,7 +153,7 @@ function updateGame() {
     }
     
     // Check game over condition
-    if (capturedPercent > 60) {
+    if (capturedPercent > 50) {
         gameState.state = 'gameOver';
         evolveAliens();
     }
@@ -250,19 +250,21 @@ function updateTurret(turret) {
     
     // Normal turret behavior if not destroyed
     if (turret.type === 'combat') {
-        // Combat turret behavior
+        // Combat turret behavior with line-of-sight checking
         let nearest = null;
         let minDist = turret.range;
         
         for (let alien of aliens) {
             let dist = sqrt((alien.x - turret.x) ** 2 + (alien.y - turret.y) ** 2);
-            if (dist < minDist) {
+            
+            // Check both distance and line of sight
+            if (dist < minDist && hasLineOfSight(turret.x, turret.y, alien.x, alien.y)) {
                 nearest = alien;
                 minDist = dist;
             }
         }
         
-        // Shoot at nearest alien
+        // Shoot at nearest alien (only if line of sight is clear)
         if (nearest && frameCount % turret.fireRate === 0) {
             projectiles.push({
                 x: turret.x,
@@ -274,7 +276,7 @@ function updateTurret(turret) {
             });
         }
     } else if (turret.type === 'money') {
-        // Money turret behavior
+        // Money turret behavior stays the same
         if (frameCount - turret.lastMoneyTime >= turret.moneyInterval && aliens.length > 1) {
             gameState.money += turret.moneyGeneration;
             turret.lastMoneyTime = frameCount;
@@ -294,13 +296,52 @@ function updateProjectile(projectile) {
             projectile.target.health -= projectile.damage;
             projectile.life = 0;
         } else {
-            // Move toward target
-            projectile.x += (dx / dist) * projectile.speed;
-            projectile.y += (dy / dist) * projectile.speed;
+            // Calculate next position
+            let nextX = projectile.x + (dx / dist) * projectile.speed;
+            let nextY = projectile.y + (dy / dist) * projectile.speed;
+            
+            // Check if next position would hit an obstacle
+            if (checkObstacleCollision(nextX, nextY)) {
+                // Projectile hits obstacle - destroy it
+                projectile.life = 0;
+                console.log("💥 Projectile hit obstacle!");
+                
+                // Optional: Create small explosion effect at impact
+                explosions.push({
+                    x: projectile.x,
+                    y: projectile.y,
+                    radius: 0,
+                    maxRadius: 20, // Smaller explosion for projectile
+                    life: 30,
+                    maxLife: 30
+                });
+            } else {
+                // Move toward target
+                projectile.x = nextX;
+                projectile.y = nextY;
+            }
         }
     }
     
     projectile.life--;
+}
+
+function hasLineOfSight(startX, startY, endX, endY) {
+    // Check if there's a clear path between two points
+    let steps = max(abs(endX - startX), abs(endY - startY));
+    let stepX = (endX - startX) / steps;
+    let stepY = (endY - startY) / steps;
+    
+    for (let i = 0; i <= steps; i++) {
+        let checkX = startX + stepX * i;
+        let checkY = startY + stepY * i;
+        
+        if (checkObstacleCollision(checkX, checkY)) {
+            return false; // Obstacle blocks the path
+        }
+    }
+    
+    return true; // Clear line of sight
 }
 
 function checkGameOver() {
@@ -431,7 +472,32 @@ function drawGame() {
     // Draw projectiles
     fill(255, 255, 0);
     for (let projectile of projectiles) {
-        ellipse(projectile.x, projectile.y, 5, 5);
+        // Draw projectile trail
+        stroke(255, 255, 0, 100);
+        strokeWeight(2);
+        
+        if (projectile.target) {
+            // Draw line from projectile to target (but only partially for trail effect)
+            let trailLength = 20;
+            let dx = projectile.target.x - projectile.x;
+            let dy = projectile.target.y - projectile.y;
+            let dist = sqrt(dx * dx + dy * dy);
+            
+            if (dist > 0) {
+                let trailX = projectile.x - (dx / dist) * trailLength;
+                let trailY = projectile.y - (dy / dist) * trailLength;
+                line(trailX, trailY, projectile.x, projectile.y);
+            }
+        }
+        
+        // Draw projectile
+        fill(255, 255, 0);
+        noStroke();
+        ellipse(projectile.x, projectile.y, 6, 6);
+        
+        // Draw small glow effect
+        fill(255, 255, 0, 100);
+        ellipse(projectile.x, projectile.y, 12, 12);
     }
     
     // Draw UI
@@ -613,4 +679,3 @@ function keyPressed() {
         selectedTurretType = 'money';
     }
 }
-

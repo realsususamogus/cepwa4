@@ -219,7 +219,7 @@ function findValidTarget() {
     let target = { x: random(width), y: random(height) };
     
     // Try up to 50 times to find a valid target
-    while (attempts < 70) {
+    while (attempts < 100) {
         target = { 
             x: random(cellSize, width - cellSize), 
             y: random(cellSize, height - cellSize) 
