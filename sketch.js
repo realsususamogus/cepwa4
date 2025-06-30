@@ -103,6 +103,8 @@ function draw() {
         updateGame();
         drawGame();
         checkGameOver();
+    } else if (gameState.state === 'gameWin') {
+        drawGameWin();
     } else {
         drawGameOver();
     }
@@ -762,13 +764,95 @@ function checkGameOver() {
         evolveAliens();
     }
     if (gameState.money < moneyTurretCost && turrets.filter(t => t.type === 'money').length === 0) {
-        gameState.state = 'gameOver';
+        gameState.state = 'gameOver2';
         evolveAliens();
     }
-    if (gameState.wave = 25 && aliens.length === 0) {
+    if (gameState.wave === 25 && aliens.length === 0) { 
         gameState.state = 'gameWin';
     }
 }
+function trackAlienPerformance(alien) {
+    // Track when alien dies and calculate survival time
+    if (!alien.spawnTime) {
+        alien.spawnTime = frameCount;
+    }
+    
+    if (alien.health <= 0) {
+        gameState.money += 100; // Reward for killing alien
+        alien.survivalTime = frameCount - alien.spawnTime;
+        // Store performance data for genetic algorithm
+        if (!alien.geneIndex && alien.geneIndex !== 0) {
+            // Find which gene this alien came from
+            for (let i = 0; i < alienGenes.length; i++) {
+                if (alienGenes[i].health === alien.maxHealth && 
+                    alienGenes[i].speed === alien.speed) {
+                    alien.geneIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        if (alien.geneIndex !== undefined) {
+            if (!alienGenes[alien.geneIndex].totalSurvivalTime) {
+                alienGenes[alien.geneIndex].totalSurvivalTime = 0;
+                alienGenes[alien.geneIndex].spawnCount = 0;
+            }
+            alienGenes[alien.geneIndex].totalSurvivalTime += alien.survivalTime;
+            alienGenes[alien.geneIndex].spawnCount++;
+        }
+    }
+}
+
+function evolveAliens() {
+    // Enhanced genetic algorithm using performance data
+    let newGenes = [];
+    
+    // Calculate fitness scores based on performance
+    for (let gene of alienGenes) {
+        if (gene.spawnCount > 0) {
+            gene.avgSurvivalTime = gene.totalSurvivalTime / gene.spawnCount;
+            gene.fitness = gene.avgSurvivalTime + (gene.health * 0.1) + (gene.speed * 10);
+        } else {
+            gene.fitness = gene.health * 0.1; // Fallback for unspawned genes
+        }
+    }
+    
+    // Sort by fitness instead of just health
+    alienGenes.sort((a, b) => (b.fitness || 0) - (a.fitness || 0));
+    
+    // Keep best performers
+    for (let i = 0; i < populationSize / 2; i++) {
+        newGenes.push({...alienGenes[i]}); // Copy to avoid reference issues
+    }
+    
+    // Create offspring with mutations
+    while (newGenes.length < populationSize) {
+        let parent1 = random(newGenes);
+        let parent2 = random(newGenes);
+        
+        let child = {
+            health: lerp(parent1.health, parent2.health, 0.5),
+            speed: lerp(parent1.speed, parent2.speed, 0.5),
+            spawnSide: random() < 0.5 ? parent1.spawnSide : parent2.spawnSide
+        };
+        
+        // Mutation
+        if (random() < mutationRate) {
+            child.health += random(-20, 20);
+            child.speed += random(-0.5, 0.5);
+            child.spawnSide = floor(random(4));
+        }
+        
+        // Clamp values to reasonable ranges
+        child.health = constrain(child.health, 30, 200);
+        child.speed = constrain(child.speed, 0.3, 3.0);
+        
+        newGenes.push(child);
+    }
+    
+    alienGenes = newGenes;
+    console.log(`🧬 Evolution complete. Best fitness: ${alienGenes[0].fitness?.toFixed(1) || 'N/A'}`);
+} 
 
 function drawGame() {
     // Draw terrain using WFC results
@@ -921,7 +1005,11 @@ function drawGameOver() {
     textAlign(CENTER);
     textSize(32);
     text("GAME OVER", width/2, height/2);
-    text("Aliens captured the territory!", width/2, height/2 + 40);
+    if (gameState.state === 'gameOver2') {
+        text("Humans have run out of money!", width/2, height/2 + 40);
+    } else {
+        text("Humans have lost control of Earth!", width/2, height/2 + 40);
+    }
     text("Press R to restart", width/2, height/2 + 80);
     textAlign(LEFT);
 }
@@ -1020,7 +1108,7 @@ function keyPressed() {
         gameState.state = 'playing';
         gameState.wave = 1;
         gameState.waveActive = false;
-        gameState.money = 100; // Reset money
+        gameState.money = 200; // Reset money
         aliens = [];
         turrets = [];
         projectiles = [];
