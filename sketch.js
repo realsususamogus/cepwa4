@@ -3,8 +3,8 @@ let gameState = {
     state: 'playing',
     wave: 1,
     waveActive: false,
-    baseResources: 1000,
     energy: 100,
+    money: 100,
     basePosition: { x: 0, y: 0 },
     spawnPosition: { x: 0, y: 0 }
 };
@@ -260,6 +260,8 @@ function updateGame() {
     // Update aliens
     for (let i = aliens.length - 1; i >= 0; i--) {
         updateAlien(aliens[i]);
+
+        trackAlienPerformance(aliens[i]);
         if (aliens[i].health <= 0) {
             aliens.splice(i, 1);
         }
@@ -726,6 +728,7 @@ function trackAlienPerformance(alien) {
     }
     
     if (alien.health <= 0) {
+        gameState.money += 100; // Reward for killing alien
         alien.survivalTime = frameCount - alien.spawnTime;
         // Store performance data for genetic algorithm
         if (!alien.geneIndex && alien.geneIndex !== 0) {
@@ -751,13 +754,25 @@ function trackAlienPerformance(alien) {
 }
 
 function evolveAliens() {
-    // Simple genetic algorithm
+    // Enhanced genetic algorithm using performance data
     let newGenes = [];
     
+    // Calculate fitness scores based on performance
+    for (let gene of alienGenes) {
+        if (gene.spawnCount > 0) {
+            gene.avgSurvivalTime = gene.totalSurvivalTime / gene.spawnCount;
+            gene.fitness = gene.avgSurvivalTime + (gene.health * 0.1) + (gene.speed * 10);
+        } else {
+            gene.fitness = gene.health * 0.1; // Fallback for unspawned genes
+        }
+    }
+    
+    // Sort by fitness instead of just health
+    alienGenes.sort((a, b) => (b.fitness || 0) - (a.fitness || 0));
+    
     // Keep best performers
-    alienGenes.sort((a, b) => b.health - a.health);
     for (let i = 0; i < populationSize / 2; i++) {
-        newGenes.push(alienGenes[i]);
+        newGenes.push({...alienGenes[i]}); // Copy to avoid reference issues
     }
     
     // Create offspring with mutations
@@ -778,11 +793,16 @@ function evolveAliens() {
             child.spawnSide = floor(random(4));
         }
         
+        // Clamp values to reasonable ranges
+        child.health = constrain(child.health, 30, 200);
+        child.speed = constrain(child.speed, 0.3, 3.0);
+        
         newGenes.push(child);
     }
     
     alienGenes = newGenes;
-}
+    console.log(`🧬 Evolution complete. Best fitness: ${alienGenes[0].fitness?.toFixed(1) || 'N/A'}`);
+} 
 
 function drawGame() {
     // Draw terrain using WFC results
@@ -855,6 +875,7 @@ function drawGame() {
     text(`Aliens: ${aliens.length}`, 10, 40);
     text(`Turrets: ${turrets.length}`, 10, 60);
     text(`Wave: ${gameState.wave}`, 150, 60); // FIXED: Use gameState.wave
+    text('Money: ' + gameState.money, 150, 40);
     
     // Show wave status
     if (!gameState.waveActive) {
@@ -892,10 +913,10 @@ function drawGameWin() {
 }
 
 function mousePressed() {
-    if (gameState.state === 'playing') {
+    if (gameState.state === 'playing' && gameState.money > 70) {
         // Place turret
         let validPlacement = true;
-        
+        gameState.money -= 70; // Cost of turret
         // Check if position is clear
         for (let obstacle of obstacles) {
             if (mouseX >= obstacle.x && mouseX <= obstacle.x + cellSize &&
