@@ -11,7 +11,7 @@ function initializeAlienGenes() {
     alienGenes = [];
     for (let i = 0; i < populationSize; i++) {
         alienGenes.push({
-            health: random(50, 150),
+            health: random(50, 250),
             speed: random(0.5, 2.5),
             spawnSide: floor(random(4)) // 0=top, 1=right, 2=bottom, 3=left
         });
@@ -219,7 +219,7 @@ function findValidTarget() {
     let target = { x: random(width), y: random(height) };
     
     // Try up to 50 times to find a valid target
-    while (attempts < 100) {
+    while (attempts < 500) {
         target = { 
             x: random(cellSize, width - cellSize), 
             y: random(cellSize, height - cellSize) 
@@ -317,7 +317,7 @@ function trackAlienPerformance(alien) {
     }
     
     if (alien.health <= 0) {
-        gameState.money += 100; // Reward for killing alien
+        //gameState.money += 100; // Reward for killing alien
         alien.survivalTime = frameCount - alien.spawnTime;
         // Store performance data for genetic algorithm
         if (!alien.geneIndex && alien.geneIndex !== 0) {
@@ -377,14 +377,14 @@ function evolveAliens() {
         
         // Mutation
         if (random() < mutationRate) {
-            child.health += random(-20, 20);
+            child.health += random(-50, 100);
             child.speed += random(-0.5, 0.5);
             child.spawnSide = floor(random(4));
         }
         
         // Clamp values to reasonable ranges
-        child.health = constrain(child.health, 30, 200);
-        child.speed = constrain(child.speed, 0.3, 3.0);
+        child.health = constrain(child.health, 30, 500);
+        child.speed = constrain(child.speed, 0.3, 5.0);
         
         newGenes.push(child);
     }

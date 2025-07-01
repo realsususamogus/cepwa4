@@ -354,7 +354,7 @@ function startWave() {
     gameState.waveActive = true;
     
     // Set up spawning parameters
-    aliensToSpawn = 3 + 5*gameState.wave; // Increase aliens per wave
+    aliensToSpawn = 3 + 7*gameState.wave; // Increase aliens per wave
     spawnTimer = 0;
    
     
@@ -371,8 +371,7 @@ function endWave() {
     // Reset spawning variables
     aliensToSpawn = 0;
     spawnTimer = 0;
-    spawnDelay -= 3
-    2
+    spawnDelay -= 3;
     // Clear aliens array
     aliens = [];
     
@@ -392,7 +391,7 @@ function checkGameOver() {
         gameState.state = 'gameOver2';
         evolveAliens();
     }
-    if (gameState.wave === 25 && aliens.length === 0) { 
+    if (gameState.wave === 26 && aliens.length === 0) { 
         gameState.state = 'gameWin';
     }
 }
